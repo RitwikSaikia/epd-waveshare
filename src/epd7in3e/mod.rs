@@ -220,7 +220,6 @@ where
     }
 }
 
-
 impl<SPI, BUSY, DC, RST, DELAY> Epd7in3e<SPI, BUSY, DC, RST, DELAY>
 where
     SPI: SpiDevice,
