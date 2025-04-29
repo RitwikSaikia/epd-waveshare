@@ -122,8 +122,6 @@ where
         self.wait_busy_low(delay);
 
         self.cmd_with_data(spi, Command::DeepSleep, &[0xa5])?;
-        self.wait_busy_low(delay);
-
         Ok(())
     }
 
