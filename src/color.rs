@@ -34,6 +34,141 @@ pub enum Color {
     White,
 }
 
+/// Four grayscale levels, packed as two bits per pixel, most significant pixel first.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(u8)]
+pub enum Gray2Color {
+    /// Black (0b00).
+    Black = 0,
+    /// Dark gray (0b01).
+    DarkGray = 1,
+    /// Light gray (0b10).
+    LightGray = 2,
+    /// White (0b11).
+    #[default]
+    White = 3,
+}
+
+impl Gray2Color {
+    /// Two-bit value of one pixel.
+    pub fn get_bits(self) -> u8 {
+        self as u8
+    }
+
+    /// A byte containing four pixels of this shade.
+    pub fn get_byte_value(self) -> u8 {
+        self.get_bits() * 0x55
+    }
+}
+
+impl TryFrom<u8> for Gray2Color {
+    type Error = OutOfColorRangeParseError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Black),
+            1 => Ok(Self::DarkGray),
+            2 => Ok(Self::LightGray),
+            3 => Ok(Self::White),
+            _ => Err(OutOfColorRangeParseError(value)),
+        }
+    }
+}
+
+impl From<Color> for Gray2Color {
+    fn from(color: Color) -> Self {
+        match color {
+            Color::Black => Self::Black,
+            Color::White => Self::White,
+        }
+    }
+}
+
+impl ColorType for Gray2Color {
+    const BITS_PER_PIXEL_PER_BUFFER: usize = 2;
+    const BUFFER_COUNT: usize = 1;
+
+    fn bitmask(&self, _bwrbit: bool, pos: u32) -> (u8, u16) {
+        let shift = 6 - (pos % 4) * 2;
+        (!(3 << shift), (self.get_bits() as u16) << shift)
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl From<Gray2Color> for embedded_graphics_core::pixelcolor::Rgb888 {
+    fn from(color: Gray2Color) -> Self {
+        let gray = match color {
+            Gray2Color::Black => 0x00,
+            Gray2Color::DarkGray => 0x80,
+            Gray2Color::LightGray => 0xC0,
+            Gray2Color::White => 0xFF,
+        };
+        Self::new(gray, gray, gray)
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl From<embedded_graphics_core::pixelcolor::Rgb888> for Gray2Color {
+    fn from(p: embedded_graphics_core::pixelcolor::Rgb888) -> Self {
+        use embedded_graphics_core::prelude::RgbColor;
+
+        let gray =
+            (u32::from(p.r()) * 299 + u32::from(p.g()) * 587 + u32::from(p.b()) * 114) / 1000;
+
+        match gray {
+            0..=63 => Gray2Color::Black,
+            64..=159 => Gray2Color::DarkGray,
+            160..=223 => Gray2Color::LightGray,
+            _ => Gray2Color::White,
+        }
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl PixelColor for Gray2Color {
+    type Raw = embedded_graphics_core::pixelcolor::raw::RawU2;
+}
+
+#[cfg(feature = "graphics")]
+impl From<embedded_graphics_core::pixelcolor::raw::RawU2> for Gray2Color {
+    fn from(raw: embedded_graphics_core::pixelcolor::raw::RawU2) -> Self {
+        use embedded_graphics_core::prelude::RawData;
+        Self::try_from(raw.into_inner()).unwrap()
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl From<Gray2Color> for embedded_graphics_core::pixelcolor::raw::RawU2 {
+    fn from(color: Gray2Color) -> Self {
+        Self::new(color.get_bits())
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl From<BinaryColor> for Gray2Color {
+    fn from(color: BinaryColor) -> Self {
+        match color {
+            BinaryColor::On => Self::Black,
+            BinaryColor::Off => Self::White,
+        }
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl From<embedded_graphics_core::pixelcolor::Gray2> for Gray2Color {
+    fn from(color: embedded_graphics_core::pixelcolor::Gray2) -> Self {
+        use embedded_graphics_core::pixelcolor::GrayColor as _;
+        Self::try_from(color.luma()).unwrap()
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl From<Gray2Color> for embedded_graphics_core::pixelcolor::Gray2 {
+    fn from(color: Gray2Color) -> Self {
+        Self::new(color.get_bits())
+    }
+}
+
 /// Only for the Black/White/Color-Displays
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum TriColor {
