@@ -2,7 +2,6 @@
 //!
 //! EPD representation of multicolor with separate buffers
 //! for each bit makes it hard to properly represent colors here
-
 #[cfg(feature = "graphics")]
 use embedded_graphics_core::pixelcolor::BinaryColor;
 #[cfg(feature = "graphics")]
@@ -16,7 +15,6 @@ impl core::fmt::Display for OutOfColorRangeParseError {
         write!(f, "Outside of possible Color Range: {}", self.0)
     }
 }
-
 impl OutOfColorRangeParseError {
     fn _new(size: u8) -> OutOfColorRangeParseError {
         OutOfColorRangeParseError(size)
@@ -33,7 +31,6 @@ pub enum Color {
     #[default]
     White,
 }
-
 /// Only for the Black/White/Color-Displays
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum TriColor {
@@ -44,6 +41,21 @@ pub enum TriColor {
     White,
     /// Chromatic color
     Chromatic,
+}
+/// Four shades of gray, stored as two bits per pixel.
+///
+/// Pixels are packed most-significant first, four per byte.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Gray2Color {
+    /// Black (00).
+    Black = 0,
+    /// Dark gray (01).
+    DarkGray = 1,
+    /// Light gray (10).
+    LightGray = 2,
+    /// White (11).
+    #[default]
+    White = 3,
 }
 
 /// For the 7 Color Displays
@@ -67,7 +79,6 @@ pub enum OctColor {
     /// HiZ / Clean Color
     HiZ = 0x07,
 }
-
 /// Color trait for use in `Display`s
 pub trait ColorType {
     /// Number of bit used to represent this color type in a single buffer.
@@ -77,7 +88,6 @@ pub trait ColorType {
     /// Number of buffer used to represent this color type
     /// splitted buffer like tricolo is 2, otherwise this should be 1.
     const BUFFER_COUNT: usize;
-
     /// Return the data used to set a pixel color
     ///
     /// * bwrbit is used to tell the value of the unused bit when a chromatic
@@ -90,7 +100,6 @@ pub trait ColorType {
     ///      this is u16 because we set 2 bytes in case of split buffer
     fn bitmask(&self, bwrbit: bool, pos: u32) -> (u8, u16);
 }
-
 impl ColorType for Color {
     const BITS_PER_PIXEL_PER_BUFFER: usize = 1;
     const BUFFER_COUNT: usize = 1;
@@ -102,7 +111,6 @@ impl ColorType for Color {
         }
     }
 }
-
 impl ColorType for TriColor {
     const BITS_PER_PIXEL_PER_BUFFER: usize = 1;
     const BUFFER_COUNT: usize = 2;
@@ -122,6 +130,15 @@ impl ColorType for TriColor {
         }
     }
 }
+impl ColorType for Gray2Color {
+    const BITS_PER_PIXEL_PER_BUFFER: usize = 2;
+    const BUFFER_COUNT: usize = 1;
+
+    fn bitmask(&self, _bwrbit: bool, pos: u32) -> (u8, u16) {
+        let shift = 6 - (pos % 4) * 2;
+        (!(0x03 << shift), (*self as u16) << shift)
+    }
+}
 
 impl ColorType for OctColor {
     const BITS_PER_PIXEL_PER_BUFFER: usize = 4;
@@ -130,6 +147,92 @@ impl ColorType for OctColor {
         let mask = !(0xF0 >> ((pos % 2) * 4));
         let bits = self.get_nibble() as u16;
         (mask, if pos % 2 == 1 { bits } else { bits << 4 })
+    }
+}
+impl Gray2Color {
+    /// Returns the 2-bit gray value.
+    pub fn get_bit_value(self) -> u8 {
+        self as u8
+    }
+
+    /// Returns a byte containing four pixels of this shade.
+    pub fn get_byte_value(self) -> u8 {
+        (self as u8) * 0x55
+    }
+
+    /// RGB representation for each of the four equally spaced gray levels.
+    pub fn rgb(self) -> (u8, u8, u8) {
+        // Color picked from: https://github.com/waveshareteam/e-Paper/blob/master/RaspberryPi_JetsonNano/c/pic/4in26_Scale.bmp
+        match self {
+            Self::Black => (0, 0, 0),
+            Self::White => (255, 255, 255),
+            Self::LightGray => (119, 119, 119),
+            Self::DarkGray => (68, 68, 68),
+        }
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl PixelColor for Gray2Color {
+    type Raw = embedded_graphics_core::pixelcolor::raw::RawU2;
+}
+
+#[cfg(feature = "graphics")]
+impl From<embedded_graphics_core::pixelcolor::raw::RawU2> for Gray2Color {
+    fn from(raw: embedded_graphics_core::pixelcolor::raw::RawU2) -> Self {
+        use embedded_graphics_core::prelude::RawData;
+        match raw.into_inner() {
+            0 => Self::Black,
+            1 => Self::DarkGray,
+            2 => Self::LightGray,
+            _ => Self::White,
+        }
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl From<Gray2Color> for embedded_graphics_core::pixelcolor::raw::RawU2 {
+    fn from(color: Gray2Color) -> Self {
+        Self::new(color.get_bit_value())
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl From<BinaryColor> for Gray2Color {
+    fn from(color: BinaryColor) -> Self {
+        match color {
+            BinaryColor::On => Self::Black,
+            BinaryColor::Off => Self::White,
+        }
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl From<Gray2Color> for embedded_graphics_core::pixelcolor::Rgb888 {
+    fn from(color: Gray2Color) -> Self {
+        let (r, g, b) = color.rgb();
+        Self::new(r, g, b)
+    }
+}
+#[cfg(feature = "graphics")]
+impl From<embedded_graphics_core::pixelcolor::Rgb888> for Gray2Color {
+    fn from(p: embedded_graphics_core::pixelcolor::Rgb888) -> Self {
+        use embedded_graphics_core::prelude::RgbColor;
+        let colors = [Self::Black, Self::DarkGray, Self::LightGray, Self::White];
+        let mut mindiff = i32::MAX;
+        let mut bestc = Self::Black;
+        for color in colors {
+            let (r, g, b) = color.rgb();
+            let diffr = i32::from(p.r()) - i32::from(r);
+            let diffg = i32::from(p.g()) - i32::from(g);
+            let diffb = i32::from(p.b()) - i32::from(b);
+            let diff = diffr * diffr + diffg * diffg + diffb * diffb;
+            if diff < mindiff {
+                mindiff = diff;
+                bestc = color;
+            }
+        }
+        bestc
     }
 }
 
@@ -150,7 +253,6 @@ impl From<OctColor> for embedded_graphics_core::pixelcolor::Rgb888 {
         Self::new(r, g, b)
     }
 }
-
 #[cfg(feature = "graphics")]
 impl From<embedded_graphics_core::pixelcolor::Rgb888> for OctColor {
     fn from(p: embedded_graphics_core::pixelcolor::Rgb888) -> OctColor {
@@ -169,7 +271,6 @@ impl From<embedded_graphics_core::pixelcolor::Rgb888> for OctColor {
         if let Some(found) = colors.iter().find(|c| c.rgb() == (p.r(), p.g(), p.b())) {
             return *found;
         }
-
         // This is not ideal but just pick the nearest color
         *colors
             .iter()
@@ -185,7 +286,6 @@ impl From<embedded_graphics_core::pixelcolor::Rgb888> for OctColor {
             .unwrap_or(&OctColor::White)
     }
 }
-
 #[cfg(feature = "graphics")]
 impl From<embedded_graphics_core::pixelcolor::raw::RawU4> for OctColor {
     fn from(b: embedded_graphics_core::pixelcolor::raw::RawU4) -> Self {
@@ -193,7 +293,6 @@ impl From<embedded_graphics_core::pixelcolor::raw::RawU4> for OctColor {
         OctColor::from_nibble(b.into_inner()).unwrap()
     }
 }
-
 #[cfg(feature = "graphics")]
 impl PixelColor for OctColor {
     type Raw = embedded_graphics_core::pixelcolor::raw::RawU4;
@@ -208,7 +307,6 @@ impl OctColor {
     pub fn colors_byte(a: OctColor, b: OctColor) -> u8 {
         a.get_nibble() << 4 | b.get_nibble()
     }
-
     ///Take the nibble (lower 4 bits) and convert to an OctColor if possible
     pub fn from_nibble(nibble: u8) -> Result<OctColor, OutOfColorRangeParseError> {
         match nibble & 0xf {
@@ -244,7 +342,6 @@ impl OctColor {
     }
 }
 //TODO: Rename get_bit_value to bit() and get_byte_value to byte() ?
-
 impl Color {
     /// Get the color encoding of the color for one bit
     pub fn get_bit_value(self) -> u8 {
@@ -261,7 +358,6 @@ impl Color {
             Color::Black => 0x00,
         }
     }
-
     /// Parses from u8 to Color
     fn from_u8(val: u8) -> Self {
         match val {
@@ -273,7 +369,6 @@ impl Color {
             ),
         }
     }
-
     /// Returns the inverse of the given color.
     ///
     /// Black returns White and White returns Black
@@ -290,7 +385,6 @@ impl From<u8> for Color {
         Color::from_u8(value)
     }
 }
-
 #[cfg(feature = "graphics")]
 impl From<embedded_graphics_core::pixelcolor::raw::RawU1> for Color {
     fn from(b: embedded_graphics_core::pixelcolor::raw::RawU1) -> Self {
@@ -302,7 +396,6 @@ impl From<embedded_graphics_core::pixelcolor::raw::RawU1> for Color {
         }
     }
 }
-
 #[cfg(feature = "graphics")]
 impl From<Color> for embedded_graphics_core::pixelcolor::raw::RawU1 {
     fn from(color: Color) -> Self {
@@ -314,7 +407,6 @@ impl From<Color> for embedded_graphics_core::pixelcolor::raw::RawU1 {
 impl PixelColor for Color {
     type Raw = embedded_graphics_core::pixelcolor::raw::RawU1;
 }
-
 #[cfg(feature = "graphics")]
 impl From<BinaryColor> for Color {
     fn from(b: BinaryColor) -> Color {
@@ -324,7 +416,6 @@ impl From<BinaryColor> for Color {
         }
     }
 }
-
 #[cfg(feature = "graphics")]
 impl From<embedded_graphics_core::pixelcolor::Rgb888> for Color {
     fn from(rgb: embedded_graphics_core::pixelcolor::Rgb888) -> Self {
@@ -343,7 +434,6 @@ impl From<embedded_graphics_core::pixelcolor::Rgb888> for Color {
         }
     }
 }
-
 #[cfg(feature = "graphics")]
 impl From<Color> for embedded_graphics_core::pixelcolor::Rgb888 {
     fn from(color: Color) -> Self {
@@ -354,7 +444,6 @@ impl From<Color> for embedded_graphics_core::pixelcolor::Rgb888 {
         }
     }
 }
-
 #[cfg(feature = "graphics")]
 impl From<embedded_graphics_core::pixelcolor::Rgb565> for Color {
     fn from(rgb: embedded_graphics_core::pixelcolor::Rgb565) -> Self {
@@ -373,7 +462,6 @@ impl From<embedded_graphics_core::pixelcolor::Rgb565> for Color {
         }
     }
 }
-
 #[cfg(feature = "graphics")]
 impl From<Color> for embedded_graphics_core::pixelcolor::Rgb565 {
     fn from(color: Color) -> Self {
@@ -384,7 +472,6 @@ impl From<Color> for embedded_graphics_core::pixelcolor::Rgb565 {
         }
     }
 }
-
 #[cfg(feature = "graphics")]
 impl From<embedded_graphics_core::pixelcolor::Rgb555> for Color {
     fn from(rgb: embedded_graphics_core::pixelcolor::Rgb555) -> Self {
@@ -403,7 +490,6 @@ impl From<embedded_graphics_core::pixelcolor::Rgb555> for Color {
         }
     }
 }
-
 #[cfg(feature = "graphics")]
 impl From<Color> for embedded_graphics_core::pixelcolor::Rgb555 {
     fn from(color: Color) -> Self {
@@ -414,7 +500,6 @@ impl From<Color> for embedded_graphics_core::pixelcolor::Rgb555 {
         }
     }
 }
-
 impl TriColor {
     /// Get the color encoding of the color for one bit
     pub fn get_bit_value(self) -> u8 {
@@ -432,7 +517,6 @@ impl TriColor {
         }
     }
 }
-
 #[cfg(feature = "graphics")]
 impl From<embedded_graphics_core::pixelcolor::raw::RawU2> for TriColor {
     fn from(b: embedded_graphics_core::pixelcolor::raw::RawU2) -> Self {
@@ -446,12 +530,10 @@ impl From<embedded_graphics_core::pixelcolor::raw::RawU2> for TriColor {
         }
     }
 }
-
 #[cfg(feature = "graphics")]
 impl PixelColor for TriColor {
     type Raw = embedded_graphics_core::pixelcolor::raw::RawU2;
 }
-
 #[cfg(feature = "graphics")]
 impl From<BinaryColor> for TriColor {
     fn from(b: BinaryColor) -> TriColor {
@@ -487,7 +569,6 @@ impl From<TriColor> for embedded_graphics_core::pixelcolor::Rgb888 {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,7 +588,6 @@ mod tests {
             assert!(result.is_err());
         }
     }
-
     #[test]
     fn u8_conversion_black() {
         assert_eq!(Color::from(Color::Black.get_bit_value()), Color::Black);
@@ -519,7 +599,6 @@ mod tests {
         assert_eq!(Color::from(Color::White.get_bit_value()), Color::White);
         assert_eq!(Color::from(1u8).get_bit_value(), 1u8);
     }
-
     #[test]
     fn test_oct() {
         let left = OctColor::Red;
@@ -529,7 +608,6 @@ mod tests {
             Ok((left, right))
         );
     }
-
     #[test]
     fn test_tricolor_bitmask() {
         assert_eq!(
@@ -544,7 +622,6 @@ mod tests {
             TriColor::Chromatic.bitmask(false, 0),
             (0b01111111, u16::from_le_bytes([0b10000000, 0b10000000]))
         );
-
         assert_eq!(
             TriColor::Black.bitmask(true, 0),
             (0b01111111, u16::from_le_bytes([0b00000000, 0b00000000]))
