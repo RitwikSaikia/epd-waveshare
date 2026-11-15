@@ -279,12 +279,15 @@ where
             HexColor::White,
         ];
 
+        const BYTES_PER_COLOR: u32 = (WIDTH * HEIGHT / 2) / 6;
+
+        self.wait_busy_low(delay);
         self.command(spi, Command::DataStartTransmission)?;
+
         for color in color_6.iter() {
-            for _ in 0..20_000 {
-                self.interface
-                    .data(spi, &[HexColor::colors_byte(*color, *color)])?;
-            }
+            let value = HexColor::colors_byte(*color, *color);
+
+            self.interface.data_x_times(spi, value, BYTES_PER_COLOR)?;
         }
 
         self.display_frame(spi, delay)
