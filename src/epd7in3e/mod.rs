@@ -165,15 +165,32 @@ where
         width: u32,
         height: u32,
     ) -> Result<(), <SPI>::Error> {
+        // Validate partial region dimensions.
         assert!(width > 0 && height > 0);
+
+        // Two pixels are packed into each byte.
+        assert_eq!(x % 2, 0, "x must be even");
+        assert_eq!(width % 2, 0, "width must be even");
+
+        // Validate region boundaries.
         assert!(matches!(x.checked_add(width), Some(end) if end <= WIDTH));
         assert!(matches!(y.checked_add(height), Some(end) if end <= HEIGHT));
-        assert_eq!(buffer.len(), (((width + 1) / 2) * height) as usize);
+
+        // Validate packed pixel buffer size.
+        assert_eq!(
+            buffer.len(),
+            (width as usize / 2) * height as usize,
+            "invalid partial framebuffer length"
+        );
 
         let x_end = x + width - 1;
         let y_end = y + height - 1;
 
+        // Wait until the controller is idle.
+
         self.wait_until_idle(spi, delay)?;
+        // Configure the partial update window.
+
         self.cmd_with_data(
             spi,
             Command::PartialWindow,
@@ -189,8 +206,16 @@ where
                 0x01,
             ],
         )?;
-        self.cmd_with_data(spi, Command::DataStartTransmission, &[0x00])?;
-        self.interface.data(spi, buffer)
+
+        // Wait for the partial-window command to finish.
+        self.wait_until_idle(spi, delay)?;
+
+        // Start transferring pixel data.
+        self.command(spi, Command::DataStartTransmission)?;
+        self.interface.data(spi, buffer)?;
+
+        // Wait for the data transfer to be accepted.
+        self.wait_until_idle(spi, delay)
     }
 
     fn display_frame(&mut self, spi: &mut SPI, delay: &mut DELAY) -> Result<(), <SPI>::Error> {
