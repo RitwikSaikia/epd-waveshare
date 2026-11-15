@@ -232,6 +232,7 @@ where
 
     fn wait_busy_low(&mut self, delay: &mut DELAY) {
         self.interface.wait_until_idle(delay, true);
+        delay.delay_ms(100);
     }
 
     /// Displays six equal-size color bands for quick panel testing.
